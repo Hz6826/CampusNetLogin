@@ -10,8 +10,8 @@ Guidance for AI coding agents working in this repository. It summarizes the proj
 - UI/network: Qt 6.8+ (`Core`, `Gui`, `Widgets`, `Network`, `Svg`)
 - Build: CMake >= 3.21, Ninja recommended
 - Primary target: Windows 10/11 x64, MinGW toolchain (CI: Qt 6.8.3 + `tools_mingw1310`, GCC 13.1)
-- License: MIT (project), Qt under LGPLv3 (dynamically linked; license texts are shipped in release builds)
-- macOS/Linux code paths exist in `AutoStart` but are not fully supported/tested; Android is not implemented
+- macOS is Tier 1 in progress: `.app`/`.dmg` build path, native menu bar, close-to-hide, menu-bar tray icon and LaunchAgent auto-start are implemented; no notarized release yet
+- Linux is Tier 2 and untested (code paths compile; no artifact story); Android is not implemented
 
 Implemented features: login/logout, connectivity test, online-session info, account storage, tray minimization, auto-start, auto-login, version check, portable mode, external custom themes (light/dark variants, icon/title-bar/border colors).
 
@@ -30,6 +30,22 @@ Notes:
 - `windeployqt` runs as a POST_BUILD step on Windows to copy the Qt runtime and plugins into `build/bin`.
 - There is no unit-test target. CI validates compilation via `.github/workflows/build-test.yml`.
 - Do not commit anything under `build/`, `cmake-build-*/`, `dist/`, `portable/`, or `local/`; see `.gitignore`.
+
+### macOS
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAPP_VERSION=2.0.0
+cmake --build build -j
+cmake --install build --prefix stage     # stage/CampusNetLogin.app, deployed + re-signed
+```
+
+- Needs Qt 6.8+ for macOS (`-DCMAKE_PREFIX_PATH=<Qt>/6.8.x/macos`); deployment target 12.0.
+- Packaging needs the `install()` rules plus `qt_generate_deploy_app_script()`; the install step then re-signs
+  inside-out (`Contents/Frameworks/*.framework`, `*.dylib`, `Contents/PlugIns/*.dylib`, then the app).
+- `-DMACOS_SIGN_IDENTITY` defaults to `-` (ad-hoc, no certificate required). Set it to a Developer ID to get
+  hardened runtime + timestamp automatically; notarization itself is still manual (`notarytool`).
+- `themes/` and `packaging/LICENSES/` are installed into `.app/Contents/Resources`; themes are seeded into the
+  user data directory on first launch (DMG has no installer).
 
 ## Repository layout
 
@@ -55,7 +71,13 @@ src/
     TrayController.{h,cpp}  QSystemTrayIcon menu, notifications, blink state
     ThemeUtils.h            Dark/light color-scheme helper
   platform/
-    AutoStart.{h,cpp}       Windows Run key / StartupApproved, macOS LaunchAgent, XDG autostart
+    Platform.h              OS capability interface: auto-start, window chrome colors,
+                            tray icon, per-user single-instance key (no #ifdef in callers)
+    Platform_win.cpp        Windows Run key / StartupApproved + DWM caption/border colors
+    Platform_mac.cpp        ~/Library/LaunchAgents + launchctl bootstrap/bootout,
+                            menu-bar template icon (QIcon::setIsMask)
+    Platform_linux.cpp      XDG autostart (honours Hidden / X-GNOME-Autostart-enabled)
+    AutoStart.{h,cpp}       Compat shell forwarding to Platform; UI call sites unchanged
   util/
     SingleInstance.{h,cpp}  QLocalServer-based single-instance guard
   AppInfo.h.in              Configured into <build>/generated/AppInfo.h
@@ -70,10 +92,14 @@ resources/
 packaging/
   installer.iss             Inno Setup installer (x64, per-user, uninstall cleanup)
   ChineseSimplified.isl     Inno Setup translation
+  macos/Info.plist.in       macOS bundle template (configured into <build>/generated/Info.plist)
+  macos/CampusNetLogin.icns macOS app icon (generated from resources/icons/app PNGs)
   LICENSES/                 MIT/Qt/GCC notices shipped with the app
 .github/workflows/
   build-test.yml            PR build check
   release.yml               Tag/manual release: validate version, build, package, publish
+  macos-build.yml           TEMPORARY: macOS build/install/dmg verification on the
+                            macos-migration branch only; delete once migration is verified
 doc/
   themes.md                 Theme authoring guide (layout, manifest, QSS conventions)
 themes/
@@ -131,14 +157,14 @@ Themes are external files, never compiled into Qt resources or the `.qrc`:
 - `QStyleHints::colorSchemeChanged` re-applies the active theme; `showEvent()` re-applies the DWM colors because `setWindowFlags()` recreates the native window handle.
 - Log level foreground colors adapt to the log widget's actual background lightness (`MainWindowLog.cpp`), not to the theme.
 - Selection persists in `ui.themeId`; switching also persists via `saveConfigSilently()`.
-- Packaging: `release.yml` copies the repo `themes/` directory into the portable zip next to the exe; `installer.iss` installs it into `%APPDATA%\Hz6826\CampusNetLogin\themes` with `uninsneveruninstall`.
+- Packaging: `release.yml` copies the repo `themes/` directory into the portable zip next to the exe; `installer.iss` installs it into `%APPDATA%\Hz6826\CampusNetLogin\themes` with `uninsneveruninstall`. On macOS `cmake --install` puts the themes into `.app/Contents/Resources/themes` and the first launch copies them into `~/Library/Application Support/Hz6826/CampusNetLogin/themes` (never overwriting existing theme folders).
 - Theme authoring details live in `doc/themes.md`; sample themes under `themes/`.
 
 ### Tray / single instance / auto-start
 
-- `TrayController` owns the tray menu/icon and notifications, blinks while busy, and calls `MainWindow::onAuthClicked()` for login/logout.
-- `SingleInstance` uses a `QLocalServer` named `<author>-<appName>`; a second process pings the primary and exits, the primary raises its window.
-- `AutoStart` writes the Windows `HKCU\...\Run` value (quoted command) and handles `StartupApproved`; macOS/Linux implementations write a LaunchAgent/XDG `.desktop` entry.
+- `TrayController` owns the tray menu/icon and notifications, blinks while busy, and calls `MainWindow::onAuthClicked()` for login/logout. It asks `Platform::trayIcon()` for the icon (macOS gets a template/mask icon) and falls back to `MainWindow::appendNotice()` when `QSystemTrayIcon::supportsMessages()` is false.
+- `SingleInstance` uses a `QLocalServer` named `<author>-<appName>-<8-hex hash of the user data dir>` (per-user, short enough for the macOS/Linux socket path limit). `tryLock()` returns `Acquired` / `AlreadyRunning` / `Failed`; `Failed` is surfaced to the user instead of exiting silently.
+- Auto-start goes through `AutoStart::state()` / `AutoStart::setEnabled()`, which forward to `Platform`: Windows writes the `HKCU\...\Run` value (quoted command) and handles `StartupApproved`; macOS writes a `~/Library/LaunchAgents/com.hz6826.CampusNetLogin.plist` and calls `launchctl bootstrap/bootout`; Linux writes an XDG `.desktop` entry and parses `Hidden` / `X-GNOME-Autostart-enabled`.
 
 ### Configuration and logs
 
@@ -178,6 +204,7 @@ Storage locations:
 
 - `build-test.yml`: runs on pull requests to `main` and `workflow_dispatch`; configures with Qt 6.8.3 + MinGW and builds Release.
 - `release.yml`: runs on tags matching `v[0-9]*` or manual dispatch. It validates the version as semver, builds, copies Qt/third-party license texts, copies the external `themes/` directory into the portable package (`themes/` next to the exe; the installer puts it in `%APPDATA%\Hz6826\CampusNetLogin\themes`), creates the portable zip (`CampusNetLogin-Portable-<version>.zip`), builds the Inno Setup installer, and publishes a GitHub release. Pre-release tags (semver `-prerelease`) are marked as such.
+- `macos-build.yml`: TEMPORARY verification only (push to `macos-migration` or manual dispatch). Runs configure/build/`cmake --install` on `macos-15`, validates the bundle (Info.plist keys, `.icns`, no build-host paths in `otool -L`), and uploads a zip + dmg artifact. It is not part of the release flow; delete the file once the migration is verified.
 - Version selection: tag `vX.Y.Z` or the `version` input; `-DAPP_VERSION` is passed to CMake, `AppVersion` to Inno Setup, and the version is embedded in `AppInfo.h` and the Windows VERSIONINFO resource.
 - Commit subjects follow the existing style: `fix(scope): ...`, `feat(scope): ...`, `build: ...`, `ci: ...`, `doc: ...`.
 - For UI/behavior changes, update `README.md` when the change affects users; keep `AGENTS.md` updated for architectural changes.
@@ -185,5 +212,5 @@ Storage locations:
 ## Current gaps / work in progress
 
 - No unit/integration tests are checked in. If you add tests, wire them into CMake and CI explicitly (the current workflows only build).
-- macOS/Linux support is best-effort and untested; installer/release artifacts are Windows-only.
+- macOS: build/package and platform behaviour are implemented (close-to-hide, native menu bar, menu-bar template icon, LaunchAgent auto-start, theme seeding) but have not been regression-tested on a real machine, and there is no notarized/notarization pipeline yet. Linux only compiles; there is no artifact story. Release artifacts remain Windows-only.
 - The main window remains fairly large despite being split across files; prefer extracting new panels/controllers rather than growing `MainWindow` further.

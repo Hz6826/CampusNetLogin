@@ -6,6 +6,7 @@
 
 - 安装版：`%APPDATA%\Hz6826\CampusNetLogin\themes\<主题ID>`
 - 便携版：主程序同目录 `themes\<主题ID>`（便携模式下 `Config::appDataDir()` 就是 exe 目录）
+- macOS：`~/Library/Application Support/Hz6826/CampusNetLogin/themes/<主题ID>`；首次启动时会从 `.app/Contents/Resources/themes` 播种，已存在的主题目录不覆盖
 - 程序启动时会自动创建 `themes` 目录；设置 → 外观 → 主题旁有「打开主题目录」按钮
 - 一个子文件夹 = 一套主题，**文件夹名就是主题 ID**（`config.json` 的 `ui.themeId` 保存的就是它）
 - `default` 是保留 ID：不使用任何自定义样式，恢复 Qt 原生样式（Windows 11 上为 `windows11`）
@@ -55,7 +56,7 @@ themes/<主题ID>/
 | `linkColor`                                 | “关于”页里富文本链接的颜色（QSS 的 `color` 管不到链接） |
 
 - 四个颜色字段都支持**单个颜色字符串**或 **`{ "light": ..., "dark": ... }` 按明暗分开**；没写或值无效时保持系统默认。
-- 标题栏/边框配色依赖 DWM，仅 Windows 11 支持；Windows 10 及更早版本会静默忽略，不影响其它样式。
+- 标题栏/边框配色依赖 DWM，**仅 Windows 11 支持**；Windows 10 及更早版本、macOS、Linux 会静默忽略，不影响其它样式。
 - 富文本链接（“关于”页的版本检查、开源许可、仓库/作者链接）的颜色由 HTML 里的 `<a>` 标签决定，QSS 的 `color` 和 `QPalette::Link` 都管不到；主题用 `linkColor` 指定，程序会写进 `<a style="color:...">`。不写时链接沿用系统默认蓝色，深色主题下可能看不清。
 
 ## styles.qss 写法
@@ -140,7 +141,7 @@ QPlainTextEdit {
     color: #c9d1d9;
     border: 1px solid #3a4a63;
     border-radius: 4px;
-    font-family: Consolas, 'Courier New', monospace;
+    font-family: Consolas, Menlo, 'DejaVu Sans Mono', 'Courier New', monospace;
     font-size: 12px;
 }
 ```

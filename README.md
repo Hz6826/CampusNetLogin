@@ -28,6 +28,7 @@
 [![Downloads](https://img.shields.io/github/downloads/Hz6826/CampusNetLogin/total?logo=github)](https://github.com/Hz6826/CampusNetLogin/releases)
 [![Downloads Latest](https://img.shields.io/github/downloads/Hz6826/CampusNetLogin/latest/total)](https://github.com/Hz6826/CampusNetLogin/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows-blue?logo=windows)](https://github.com/Hz6826/CampusNetLogin/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple)](https://github.com/Hz6826/CampusNetLogin/releases/latest)
 
 </div>
 
@@ -40,11 +41,40 @@
 
 > [!NOTE]
 > 两个版本的程序本体相同。便携模式判定：主程序同目录下存在 `config.json` 或 `portable.flag` 时，按便携版运行——读取同目录的 `config.json`，日志写到同目录的 `./logs/` 下。安装版则使用 `%APPDATA%\Hz6826\CampusNetLogin\config.json`，日志在同目录的 `logs\` 下。
+> macOS 没有便携模式：`.app` 内部写入会破坏代码签名，配置与日志固定放在 `~/Library/Application Support/Hz6826/CampusNetLogin/`。
 
 > [!WARNING]
 > **安全说明**
-> - 配置文件里的密码目前以**明文**保存（安装版在 `%APPDATA%\Hz6826\CampusNetLogin\config.json`，便携版在主程序同目录）。请勿分享 `config.json`，也尽量不要把便携版放在公共或共享目录中。
+> - 配置文件里的密码目前以**明文**保存（安装版在 `%APPDATA%\Hz6826\CampusNetLogin\config.json`，便携版在主程序同目录，macOS 在 `~/Library/Application Support/Hz6826/CampusNetLogin/config.json`）。请勿分享 `config.json`，也尽量不要把便携版放在公共或共享目录中。
 > - 日志默认对 `token`、`password`、`chksum` 等敏感字段脱敏。在“关于”页双击应用图标可以关闭脱敏（状态会保存到配置，再次双击恢复）；关闭后日志会包含明文敏感信息，请勿随意分享日志文件。
+
+## macOS
+
+macOS 版提供 `.app` / `.dmg`，目前**未随正式 Release 发布**：构建与打包链路已打通，界面行为的 macOS 适配已实现，但尚未在真机做登录回归。
+
+- **安装**：把 `CampusNetLogin.app` 拖进「应用程序」。
+- **首次启动**：包默认用 ad-hoc 签名（没有 Apple 开发者证书），Gatekeeper 会拦一次。去「系统设置 → 隐私与安全性」点「仍要打开」，或先执行 `xattr -dr com.apple.quarantine /Applications/CampusNetLogin.app`。macOS 15 起已取消「右键 → 打开」的绕过方式。
+- **已知差异**：
+  - 标题栏/边框配色仅 Windows 生效（主题 `manifest.json` 里的 `titleBarColor` / `borderColor` 在 macOS 无效）；
+  - 关窗只是收起窗口，退出用 `Cmd+Q` 或菜单；
+  - 开机自启走 `~/Library/LaunchAgents` 里的 LaunchAgent，在「系统设置 → 通用 → 登录项」里也能看到；
+  - 主题随 `.app` 一起发布，首次启动自动复制到用户主题目录。
+- **架构**：arm64（Apple Silicon）；Intel Mac 需自行构建或等 universal 包。
+
+### 从源码构建（macOS）
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAPP_VERSION=2.0.0
+cmake --build build -j
+cmake --install build --prefix stage     # 生成 stage/CampusNetLogin.app，并做 ad-hoc 重签
+```
+
+需要 Qt 6.8+（Qt 不在 `PATH` 时加 `-DCMAKE_PREFIX_PATH=<Qt>/6.8.x/macos`）。
+
+打包后必须重签：`macdeployqt` 搬动 framework 会让原签名失效，Apple Silicon 上会直接拒跑。
+默认 ad-hoc（`-DMACOS_SIGN_IDENTITY=-`）；有 Developer ID 时改成
+`-DMACOS_SIGN_IDENTITY="Developer ID Application: 你的名字 (TEAMID)"`，
+签名步骤会自动加硬化运行时与时间戳（公证的前置条件），公证本身仍需手动 `notarytool`。
 
 ## 功能列表
 
@@ -63,10 +93,13 @@
 | 自动登录           | :white_check_mark:    |
 | 自动检查版本         | :white_check_mark:    |
 | 自定义主题          | :white_check_mark:    |
-| macOS/Linux 支持 | :memo:                |
+| macOS 支持       | :memo: ^2             |
+| Linux 支持       | :x: ^3                |
 | Android 支持     | :white_check_mark: ^1 |
 
 ^1: Android 客户端（Kotlin + Miuix）已独立维护：[CampusNetLoginAndroid](https://github.com/Hz6826/CampusNetLoginAndroid)，支持 Android 8.0 及以上版本。
+^2: macOS 侧的构建/打包、关窗语义、原生菜单栏、菜单栏图标、LaunchAgent 自启已完成；真机登录回归与公证发行尚未进行。
+^3: Linux 代码路径可以编译，但没有产物与发行方案（自带 Qt 的 AppImage 未实现）。
 
 ## 自定义主题
 
@@ -74,8 +107,9 @@
 
 - 安装版主题目录：`%APPDATA%\Hz6826\CampusNetLogin\themes`
 - 便携版主题目录：主程序同目录 `themes`
+- macOS 主题目录：`~/Library/Application Support/Hz6826/CampusNetLogin/themes`（首次启动从 `.app` 内置的 `themes/` 复制过去）
 - 内置示例：蓝调（`blue`）、樱花（`sakura`）、赛博（`cyber`）、矩阵（`matrix`），均带明暗两套
-- 便携版 zip 与安装包都会附带这些示例主题：便携版在 exe 同目录的 `themes/`，安装版装到上面的 AppData 目录
+- 便携版 zip、安装包与 macOS `.dmg` 都会附带这些示例主题：便携版在 exe 同目录的 `themes/`，安装版装到上面的 AppData 目录，macOS 随 `.app` 一起发
 
 主题结构、`manifest.json` 字段（主题名/作者/图标线条色/标题栏与边框配色等）以及 QSS 写法见 **[doc/themes.md](doc/themes.md)**。
 
