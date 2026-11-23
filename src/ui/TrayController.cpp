@@ -1,6 +1,7 @@
 #include "ui/TrayController.h"
 #include "ui/MainWindow.h"
 #include "net/SrunClient.h"
+#include "platform/Platform.h"
 #include "AppInfo.h"
 
 #include <QAction>
@@ -66,13 +67,17 @@ TrayController::TrayController(SrunClient *client, MainWindow *window,
 void TrayController::createTray() {
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
         qWarning() << "系统托盘不可用，TrayController 已禁用";
+        // 没有托盘就没有后台入口：关窗会直接退出、也收不到通知，得让用户知道
+        m_window->appendNotice(
+            "WARN",
+            "系统托盘不可用：关闭窗口将直接退出程序，登录/注销也不会弹通知。");
         return;
     }
 
     m_tray = new QSystemTrayIcon(this);
     m_tray->setContextMenu(m_menu);
     m_tray->setToolTip(AppInfo::Description);
-    m_tray->setIcon(trayIconForState(m_onlineState));
+    m_tray->setIcon(Platform::trayIcon(trayIconForState(m_onlineState)));
 
     m_tray->show();
 
@@ -124,7 +129,7 @@ void TrayController::updateTrayIcon() {
         }
     }
 
-    m_tray->setIcon(trayIconForState(effective));
+    m_tray->setIcon(Platform::trayIcon(trayIconForState(effective)));
 }
 
 void TrayController::updateMenuActions() {
@@ -145,12 +150,21 @@ void TrayController::updateMenuActions() {
 void TrayController::showNotification(const QString &title,
                                       const QString &msg,
                                       bool success) {
-    if (!m_tray) return;
-    m_tray->showMessage(
-        title,
-        msg,
-        success ? QSystemTrayIcon::Information : QSystemTrayIcon::Warning,
-        3000);
+    // supportsMessages() 为 false 的平台（没有通知守护进程的 Linux、部分精简系统）里
+    // showMessage() 是静默失败，用户什么都看不到 → 退回窗口内日志
+    if (m_tray && QSystemTrayIcon::supportsMessages()) {
+        m_tray->showMessage(
+            title,
+            msg,
+            success ? QSystemTrayIcon::Information : QSystemTrayIcon::Warning,
+            3000);
+        return;
+    }
+
+    if (m_window) {
+        m_window->appendNotice(success ? "INFO" : "WARN",
+                               QStringLiteral("%1：%2").arg(title, msg));
+    }
 }
 
 // ============================================================
@@ -158,16 +172,25 @@ void TrayController::showNotification(const QString &title,
 // ============================================================
 
 void TrayController::onTrayActivated(QSystemTrayIcon::ActivationReason reason) {
-    if (reason == QSystemTrayIcon::Trigger) {
-        // 左键单击：切换窗口显隐
-        if (m_window->isVisible()) {
-            m_window->hide();
-        } else {
-            m_window->showNormal();
-            m_window->raise();
-            m_window->activateWindow();
-        }
+    if (reason != QSystemTrayIcon::Trigger)
+        return;
+
+#ifdef Q_OS_MACOS
+    // macOS 菜单栏图标：左键只负责把窗口叫出来。收起窗口走菜单里的「隐藏」，
+    // 避免误触把正在用的窗口藏掉（mac 上托盘也没有"双击"语义）
+    m_window->showNormal();
+    m_window->raise();
+    m_window->activateWindow();
+#else
+    // 左键单击：切换窗口显隐
+    if (m_window->isVisible()) {
+        m_window->hide();
+    } else {
+        m_window->showNormal();
+        m_window->raise();
+        m_window->activateWindow();
     }
+#endif
 }
 
 void TrayController::onShowWindow() {

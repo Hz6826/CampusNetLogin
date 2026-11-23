@@ -63,13 +63,14 @@ MainWindow::MainWindow(SrunClient *client, QWidget *parent)
 
 void MainWindow::closeEvent(QCloseEvent *event) {
     if (m_forceQuit) {
-        saveWindowGeometryToConfig();
+        quitAfterClose();
         event->accept();
         return;
     }
 
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
-        saveWindowGeometryToConfig();
+        // 没有托盘就没有后台入口，只能直接退出
+        quitAfterClose();
         event->accept();
         return;
     }
@@ -80,7 +81,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
             hide();
             return;
         case CloseAction::Quit:
-            saveWindowGeometryToConfig();
+            quitAfterClose();
             event->accept();
             return;
         default:
@@ -120,9 +121,19 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         event->ignore();
         hide();
     } else {
-        saveWindowGeometryToConfig();
+        quitAfterClose();
         event->accept();
     }
+}
+
+void MainWindow::quitAfterClose() {
+    saveWindowGeometryToConfig();
+
+#ifdef Q_OS_MACOS
+    // macOS 上关闭最后一个窗口不会结束进程（setQuitOnLastWindowClosed(false)），
+    // 需要显式退出，否则会留下一个没有窗口的后台进程
+    QTimer::singleShot(0, qApp, &QApplication::quit);
+#endif
 }
 
 void MainWindow::changeEvent(QEvent *event) {

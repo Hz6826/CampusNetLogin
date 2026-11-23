@@ -23,7 +23,13 @@ void MainWindow::loadConfigToUi() {
     m_acIdEdit->setText(m_config.acId);
     m_domainEdit->setText(m_config.domain);
 
-    m_autoStartCheck->setChecked(AutoStart::isEnabled());
+    // 自启状态以系统的真实状态为准（不读配置文件），平台不支持时禁用勾选框
+    const AutoStart::AutoStartState autoStartState = AutoStart::state();
+    m_autoStartCheck->setChecked(autoStartState == AutoStart::AutoStartState::Enabled);
+    if (autoStartState == AutoStart::AutoStartState::Unsupported) {
+        m_autoStartCheck->setEnabled(false);
+        m_autoStartCheck->setToolTip("当前系统不支持开机自启");
+    }
     m_autoLoginCheck->setChecked(m_config.autoLogin);
 
     m_filterHttpCheck->setChecked(m_config.filterHttpLog);

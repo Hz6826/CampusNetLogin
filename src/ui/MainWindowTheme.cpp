@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QColor>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -23,22 +24,7 @@
 #include <QStringList>
 #include <QUrl>
 
-#ifdef Q_OS_WIN
-#  include <windows.h>
-#  include <dwmapi.h>
-#  ifndef DWMWA_BORDER_COLOR
-#    define DWMWA_BORDER_COLOR 34
-#  endif
-#  ifndef DWMWA_CAPTION_COLOR
-#    define DWMWA_CAPTION_COLOR 35
-#  endif
-#  ifndef DWMWA_TEXT_COLOR
-#    define DWMWA_TEXT_COLOR 36
-#  endif
-#  ifndef DWMWA_COLOR_DEFAULT
-#    define DWMWA_COLOR_DEFAULT 0xFFFFFFFF
-#  endif
-#endif
+#include "platform/Platform.h"
 
 namespace {
 
@@ -193,6 +179,38 @@ namespace {
             || QFile::exists(themeDir + QStringLiteral("/styles-dark.qss"));
     }
 
+    // macOS 的 DMG 没有安装器，主题是随 .app 一起发的：
+    // 首次启动时把它们播种到用户目录，否则用户拿到的主题列表是空的。
+    // 已存在的主题目录一律不覆盖，避免冲掉用户自己的改动。
+    void seedBundledThemes(const QString &targetDir) {
+#if defined(Q_OS_MACOS)
+        // .app/Contents/MacOS/exe → .app/Contents/Resources/themes
+        const QDir bundled(QCoreApplication::applicationDirPath()
+                           + QStringLiteral("/../Resources/themes"));
+        if (!bundled.exists())
+            return;
+        if (!QDir().mkpath(targetDir))
+            return;
+
+        const QStringList names = bundled.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString &name : names) {
+            const QString sourceDir = bundled.absolutePath() + QLatin1Char('/') + name;
+            const QString destDir = targetDir + QLatin1Char('/') + name;
+            if (QDir(destDir).exists())
+                continue;
+            if (!QDir().mkpath(destDir))
+                continue;
+            const QStringList files = QDir(sourceDir).entryList(QDir::Files);
+            for (const QString &file : files) {
+                QFile::copy(sourceDir + QLatin1Char('/') + file,
+                            destDir + QLatin1Char('/') + file);
+            }
+        }
+#else
+        Q_UNUSED(targetDir)
+#endif
+    }
+
 } // namespace
 
 QString MainWindow::themesDirPath() {
@@ -274,34 +292,16 @@ void MainWindow::applyLinkColor() {
 }
 
 void MainWindow::applyWindowChromeColors() {
-#ifdef Q_OS_WIN
-    const auto toColorRef = [](const QColor &color) {
-        return color.isValid()
-                   ? RGB(color.red(), color.green(), color.blue())
-                   : static_cast<COLORREF>(DWMWA_COLOR_DEFAULT);
-    };
-
     const QColor captionColor = themeTitleBarColor();
 
-    // 自定义标题栏/边框颜色需要 Windows 11；旧系统调用失败，保持系统外观
-    const HWND hwnd = reinterpret_cast<HWND>(winId());
-    const COLORREF caption = toColorRef(captionColor);
-    if (FAILED(DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &caption,
-                                     sizeof(caption)))) {
-        return;
-    }
+    // 文字色跟随底色亮度，避免深底黑字；非 Windows 平台由 Platform 静默降级
+    const QColor textColor =
+        captionColor.isValid()
+            ? (captionColor.lightness() < 128 ? QColor(Qt::white) : QColor(Qt::black))
+            : QColor();
 
-    // 文字色跟随底色亮度，避免深底黑字
-    const COLORREF text =
-        toColorRef(captionColor.isValid()
-                       ? (captionColor.lightness() < 128 ? QColor(Qt::white)
-                                                         : QColor(Qt::black))
-                       : QColor());
-    DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &text, sizeof(text));
-
-    const COLORREF border = toColorRef(themeBorderColor());
-    DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
-#endif
+    Platform::applyWindowChromeColors(
+        this, {captionColor, textColor, themeBorderColor()});
 }
 
 void MainWindow::refreshTheme() {
@@ -319,9 +319,12 @@ void MainWindow::updateThemeList() {
         return;
 
     const QDir themesDir(themesDirPath());
-    if (!themesDir.exists())
+    if (!themesDir.exists()) {
+        // macOS：首次启动从 .app 里播种主题
+        seedBundledThemes(themesDir.absolutePath());
         // ReSharper disable once CppExpressionWithoutSideEffects
         QDir().mkpath(themesDir.absolutePath()); // 先建好目录，方便用户放主题
+    }
 
     m_themeCombo->clear();
 

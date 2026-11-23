@@ -4,6 +4,6 @@ QPlainTextEdit {
     color: #c9d1d9;
     border: 1px solid #3a4a63;
     border-radius: 4px;
-    font-family: Consolas, 'Courier New', monospace;
+    font-family: Consolas, Menlo, 'DejaVu Sans Mono', 'Courier New', monospace;
     font-size: 12px;
 }

@@ -33,6 +33,9 @@ public:
     void setForceQuit(bool force);
     const Config &config() const;
 
+    // 供 TrayController 在托盘不可用/通知失败时把提示写进日志面板
+    void appendNotice(const QString &level, const QString &msg);
+
 protected:
     void closeEvent(QCloseEvent *event) override;
     void changeEvent(QEvent *event) override;
@@ -68,6 +71,9 @@ private:
     void loadIcons();
     void refreshUiIcons();
     void buildUi();
+#ifdef Q_OS_MACOS
+    void buildUiMenuBar();
+#endif
     void buildUiAuthForm(QVBoxLayout *mainLayout);
     void buildUiAutoLogin(QVBoxLayout *uiSettingsLayout);
     void buildUiPollingSetting(QVBoxLayout *uiSettingsLayout);
@@ -130,6 +136,8 @@ private:
     void onVersionCheckFinished(QNetworkReply *reply);
     void updateLogSensitiveUi() const;
     void toggleLogSensitive();
+    // 保存窗口几何并退出。macOS 关掉最后一个窗口不会结束进程，这里统一兜住
+    void quitAfterClose();
 
     // ---------- 主题配置（MainWindowTheme.cpp）----------
     static QString themesDirPath();
@@ -234,6 +242,11 @@ private:
     static constexpr int kWindowMaxHeight    = kWindowMinHeight + 200;
 
     static constexpr int kMaxAutoLoginFailNotifyCount = 3;
+
+    // 标签页顺序：日志 / 在线信息 / 设置 / 关于。macOS 的菜单项要跳到对应页
+    static constexpr int kLogTabIndex      = 0;
+    static constexpr int kSettingsTabIndex = 2;
+    static constexpr int kAboutTabIndex    = 3;
 
 signals:
     void onlineStateChanged(OnlineState state);

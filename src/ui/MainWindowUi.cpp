@@ -13,6 +13,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -21,8 +22,11 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -112,12 +116,46 @@ void MainWindow::buildUi() {
     buildUiOpBtnRow(mainLayout);
     buildUiInfoArea(mainLayout);
 
+#ifdef Q_OS_MACOS
+    // macOS 必须有原生菜单栏：没有它就没有 Cmd+Q / Cmd+,，
+    // 而关窗又不退出进程，用户会找不到退出入口
+    buildUiMenuBar();
+#endif
+
     setCentralWidget(central);
     setMinimumWidth(kWindowMinWidth);
     setMinimumHeight(kWindowMinHeight);
     setMaximumWidth(kWindowMaxWidth);
     setMaximumHeight(kWindowMaxHeight);
 }
+
+#ifdef Q_OS_MACOS
+void MainWindow::buildUiMenuBar() {
+    // QMainWindow::menuBar() 在 macOS 上自动变成屏幕顶部的全局菜单栏，
+    // 第一个子菜单由系统渲染成"应用菜单"
+    QMenuBar *bar = menuBar();
+
+    QMenu *appMenu = bar->addMenu(QStringLiteral("CampusNetLogin"));
+
+    QAction *aboutAction = appMenu->addAction(QStringLiteral("关于校园网络助手"));
+    connect(aboutAction, &QAction::triggered, this,
+            [this] { m_detailTab->setCurrentIndex(kAboutTabIndex); });
+
+    QAction *settingsAction = appMenu->addAction(QStringLiteral("设置…"));
+    settingsAction->setShortcut(QKeySequence::Preferences); // Cmd+,
+    connect(settingsAction, &QAction::triggered, this,
+            [this] { m_detailTab->setCurrentIndex(kSettingsTabIndex); });
+
+    appMenu->addSeparator();
+
+    QAction *quitAction = appMenu->addAction(QStringLiteral("退出校园网络助手"));
+    quitAction->setShortcut(QKeySequence::Quit); // Cmd+Q
+    connect(quitAction, &QAction::triggered, this, [this] {
+        setForceQuit(true); // 让 closeEvent 放行
+        close();
+    });
+}
+#endif
 
 void MainWindow::buildUiAuthForm(QVBoxLayout *mainLayout) {
     auto *authGroup = new QGroupBox("账户信息");

@@ -15,6 +15,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QPlainTextEdit>
 #include <QTextCharFormat>
@@ -155,13 +156,28 @@ QString MainWindow::logDirPath() {
 
 QString MainWindow::defaultLogStyleSheet() {
     // 日志区默认配色；主题里的 log_textedit.qss 存在时会覆盖它
+    // 字体：Windows 保持 Consolas 不变；其他平台没有 Consolas，用系统等宽字体兜底
+#if defined(Q_OS_WIN)
+    const QString fontStack = QStringLiteral("Consolas, Menlo, 'DejaVu Sans Mono', "
+                                             "'Courier New', monospace");
+#else
+    const QString fontStack = QStringLiteral("'%1', Menlo, 'DejaVu Sans Mono', "
+                                             "Consolas, 'Courier New', monospace")
+                                  .arg(QFontDatabase::systemFont(QFontDatabase::FixedFont).family());
+#endif
+
     return QStringLiteral(
         "QPlainTextEdit {"
         "  background-color: #1E1E1E;"
         "  color: #D4D4D4;"
         "  border: 1px solid #3C3C3C;"
-        "  font-family: Consolas, 'Courier New', monospace;"
+        "  font-family: %1;"
         "  font-size: 12px;"
         "}"
-    );
+    ).arg(fontStack);
+}
+
+void MainWindow::appendNotice(const QString &level, const QString &msg) {
+    // 托盘/通知不可用时，把本应弹通知的内容落到日志面板，保证用户看得到
+    appendLog(level, msg);
 }

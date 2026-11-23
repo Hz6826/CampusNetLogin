@@ -30,9 +30,19 @@ namespace {
     }
 
     bool isPortableMode() {
+#if defined(Q_OS_MACOS)
+        // .app 内部写入会破坏代码签名，macOS 不提供便携模式
+        return false;
+#else
         // 新标记优先；config.json 存在视为兼容旧版便携部署
-        return QFile::exists(portableFlagPath())
-            || QFile::exists(portableConfigPath());
+        if (!QFile::exists(portableFlagPath())
+            && !QFile::exists(portableConfigPath()))
+            return false;
+
+        // 目录不可写（只读挂载、Program Files、受管设备……）时便携模式必然失败，
+        // 这时退回用户目录，不要把配置和日志丢在只读位置
+        return QFileInfo(QCoreApplication::applicationDirPath()).isWritable();
+#endif
     }
 
     // 损坏的配置文件改名备份，绝不静默覆盖
