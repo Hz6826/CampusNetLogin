@@ -12,6 +12,13 @@ out/
 dist/
 portable/
 *.zip
+# macOS / Linux
+*.app/
+*.dmg
+*.AppImage
+*.flatpak
+stage/
+build-*/
 
 # ---------- 本地运行时数据（可能含明文密码/敏感日志） ----------
 config.json

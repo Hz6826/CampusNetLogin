@@ -1,0 +1,86 @@
+# 临时验证用：只跑 macOS 的构建 + 打包，用来替代"本机没有 Mac"的验证手段。
+# 不改动现有的 build-test.yml / release.yml，迁移验收完成后整个文件删除即可。
+name: macOS Build (temp)
+
+on:
+  push:
+    branches: [ macos-migration ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15          # arm64，Qt 6.8 官方支持 macOS 12+
+    env:
+      QT_VERSION: '6.8.3'
+      BUILD_TYPE: Release
+      APP_VERSION: '2.0.0'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0        # GetGitVersion.cmake 需要完整历史
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4.4.0
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: 'clang_64'
+          cache: true
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DAPP_VERSION=${{ env.APP_VERSION }}
+
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+
+      # 部署 Qt 运行时（macdeployqt）并做 ad-hoc 重签
+      - name: Install
+        run: cmake --install build --prefix "$PWD/stage"
+
+      - name: 校验产物
+        run: |
+          APP="stage/CampusNetLogin.app"
+          test -d "$APP" || { echo "::error::没有生成 .app"; exit 1; }
+
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist"
+          test -f "$APP/Contents/Resources/CampusNetLogin.icns" || { echo "::error::缺 .icns"; exit 1; }
+          test -d "$APP/Contents/Resources/themes" || { echo "::error::缺主题播种源"; exit 1; }
+
+          echo "--- codesign ---"
+          codesign -dv --verbose=2 "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+          echo "--- frameworks ---"
+          ls "$APP/Contents/Frameworks"
+          ls "$APP/Contents/PlugIns"
+
+          echo "--- 依赖里的构建机绝对路径（应为空）---"
+          if otool -L "$APP/Contents/MacOS/CampusNetLogin" | grep -E '/Users/|/opt/homebrew'; then
+            echo "::error::可执行文件仍引用构建机绝对路径"
+            exit 1
+          fi
+
+      - name: 打包 zip + dmg
+        run: |
+          ditto -c -k --keepParent stage/CampusNetLogin.app \
+            "CampusNetLogin-${APP_VERSION}-macos.zip"
+          hdiutil create -volname CampusNetLogin \
+            -srcfolder stage/CampusNetLogin.app \
+            -ov -format UDZO \
+            "CampusNetLogin-${APP_VERSION}.dmg"
+          ls -lh CampusNetLogin-*.zip CampusNetLogin-*.dmg
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: CampusNetLogin-macos
+          path: |
+            CampusNetLogin-*.zip
+            CampusNetLogin-*.dmg
+          if-no-files-found: error

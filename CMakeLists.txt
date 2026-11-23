@@ -1,6 +1,12 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.21.1)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+# ---------- 平台基线 ----------
+# Qt 6.8 官方支持 macOS 12+；这个变量必须在 project() 之前设置才会生效
+if (APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Qt 6.8 minimum macOS target")
+endif ()
 
 # ---------- 版本号处理 ----------
 # APP_VERSION 可能是 "1.0.0-rc.3" 这种带后缀的形式
@@ -40,6 +46,17 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
 
 qt_standard_project_setup()
 
+# ---------- 平台相关源码 ----------
+# 只有开机自启/标题栏着色/托盘图标这几处需要按平台分文件，
+# 其余代码全部走 Qt，不写 #ifdef。
+if (WIN32)
+    set(PLATFORM_SOURCES src/platform/Platform_win.cpp)
+elseif (APPLE)
+    set(PLATFORM_SOURCES src/platform/Platform_mac.cpp)
+else ()
+    set(PLATFORM_SOURCES src/platform/Platform_linux.cpp)
+endif ()
+
 # ---------- 可执行目标 ----------
 qt_add_executable(CampusNetLogin
         src/main.cpp
@@ -49,7 +66,9 @@ qt_add_executable(CampusNetLogin
         src/ui/MainWindow.cpp
         src/ui/TrayController.cpp
         resources/resources.qrc
+        src/platform/Platform.cpp
         src/platform/AutoStart.cpp
+        ${PLATFORM_SOURCES}
         src/ui/ThemeUtils.h
         src/ui/MainWindowUi.cpp
         src/ui/MainWindowLog.cpp
@@ -65,6 +84,37 @@ qt_add_executable(CampusNetLogin
 set_target_properties(CampusNetLogin PROPERTIES
         WIN32_EXECUTABLE $<NOT:$<CONFIG:Debug>>
 )
+
+# ---------- macOS 应用包 ----------
+# macOS 签名身份：默认 "-" = ad-hoc 签名（无需任何证书，本机运行必需）。
+# 拿到 Developer ID 后改成 "Developer ID Application: 名字 (TEAMID)"，
+# 脚本会自动加上硬化运行时与时间戳，为公证做准备。
+set(MACOS_SIGN_IDENTITY "-" CACHE STRING
+        "macOS codesign identity: '-' = ad-hoc, or 'Developer ID Application: ...'")
+
+if (APPLE)
+    set_target_properties(CampusNetLogin PROPERTIES
+            MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/generated/Info.plist"
+            MACOSX_BUNDLE_BUNDLE_NAME "CampusNetLogin"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "com.hz6826.CampusNetLogin"
+            MACOSX_BUNDLE_ICON_FILE "CampusNetLogin.icns"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${APP_NUMERIC_VERSION}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${APP_VERSION}"
+    )
+
+    # Info.plist 模板里的 @APP_VERSION@ 等变量在配置期展开
+    configure_file(
+            "${CMAKE_SOURCE_DIR}/packaging/macos/Info.plist.in"
+            "${CMAKE_BINARY_DIR}/generated/Info.plist"
+            @ONLY
+    )
+
+    # MACOSX_BUNDLE_ICON_FILE 只是文件名，真正的 .icns 要作为 bundle 资源加进 target
+    set_source_files_properties("packaging/macos/CampusNetLogin.icns"
+            PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+    target_sources(CampusNetLogin PRIVATE packaging/macos/CampusNetLogin.icns)
+endif ()
 
 # ---------- 生成 AppInfo.h（含 Git 信息） ----------
 set(GIT_VERSION_FILE  ${CMAKE_BINARY_DIR}/generated/git_version.cmake)
@@ -172,4 +222,71 @@ if (WIN32)
     else ()
         message(WARNING "windeployqt not found, runtime DLLs may not be copied")
     endif ()
+endif ()
+
+# ---------- 安装规则 ----------
+# macOS/Linux 的打包工具（macdeployqt / linuxdeploy / AppImage）都要求先有 install()；
+# Windows 的发布链路仍走 dist + Inno Setup，不受影响。
+include(GNUInstallDirs)
+
+install(TARGETS CampusNetLogin
+        BUNDLE DESTINATION .
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+if (APPLE)
+    # 主题是外置文件，DMG 里没有安装器 → 放进 .app 资源目录，首次启动时播种到用户目录
+    install(DIRECTORY themes/ DESTINATION CampusNetLogin.app/Contents/Resources/themes)
+    # LGPLv3 合规：Qt 许可证与 relink 说明随包发布
+    install(DIRECTORY packaging/LICENSES/ DESTINATION CampusNetLogin.app/Contents/Resources/LICENSES)
+endif ()
+
+# 部署 Qt 运行时（macOS: macdeployqt；Linux: 交由 linuxdeploy/AppImage 处理）
+if (NOT WIN32)
+    qt_generate_deploy_app_script(
+            TARGET CampusNetLogin
+            OUTPUT_SCRIPT qt_deploy_script
+            NO_UNSUPPORTED_PLATFORM_ERROR)
+    install(SCRIPT ${qt_deploy_script})
+endif ()
+
+if (APPLE)
+    # macdeployqt 移动/改写 framework 后原签名失效，Apple Silicon 上会直接拒跑
+    # （双击提示「已损坏」）。这里由内到外重新签名；默认 ad-hoc。
+    set(_codesign_flags --force)
+    if (NOT MACOS_SIGN_IDENTITY STREQUAL "-")
+        # 硬化运行时 + 时间戳是公证的前置条件，ad-hoc 签名拿不到时间戳
+        set(_codesign_flags ${_codesign_flags} --options runtime --timestamp)
+    endif ()
+
+    install(CODE "
+        set(_app \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/CampusNetLogin.app\")
+        if (NOT EXISTS \"\${_app}\")
+            message(FATAL_ERROR \"找不到应用包：\${_app}\")
+        endif ()
+
+        # 安装过程可能带上扩展属性，先清掉再签名
+        execute_process(COMMAND xattr -cr \"\${_app}\")
+
+        file(GLOB _app_parts
+                \"\${_app}/Contents/Frameworks/*.framework\"
+                \"\${_app}/Contents/Frameworks/*.dylib\"
+                \"\${_app}/Contents/PlugIns/*.dylib\")
+        foreach (_part IN LISTS _app_parts)
+            execute_process(
+                    COMMAND codesign ${_codesign_flags} --sign \"${MACOS_SIGN_IDENTITY}\" \"\${_part}\"
+                    RESULT_VARIABLE _rc)
+            if (NOT _rc EQUAL 0)
+                message(FATAL_ERROR \"codesign 失败：\${_part}\")
+            endif ()
+        endforeach ()
+
+        message(STATUS \"签名 \${_app}（identity: ${MACOS_SIGN_IDENTITY}）\")
+        execute_process(
+                COMMAND codesign ${_codesign_flags} --sign \"${MACOS_SIGN_IDENTITY}\" \"\${_app}\"
+                RESULT_VARIABLE _rc)
+        if (NOT _rc EQUAL 0)
+            message(FATAL_ERROR \"codesign 失败：\${_app}\")
+        endif ()
+    ")
 endif ()

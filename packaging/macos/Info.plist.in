@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  校园网络助手（CampusNetLogin）macOS 应用包描述文件。
+  由 CMake 在配置期展开 @变量@，生成到 <build>/generated/Info.plist。
+
+  注意：
+  - CFBundleIdentifier 必须与 LaunchAgent 的 label（src/platform/Platform_mac.cpp）保持一致；
+  - CFBundleVersion 只能是纯数字（与 Windows VERSIONINFO、Inno Setup 的版本规则一致），
+    带 -rc.1 这类后缀时由 APP_VERSION 走 CFBundleShortVersionString；
+  - 本应用有主窗口，不能设置 LSUIElement=true，否则 Dock 里没有入口。
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh_CN</string>
+    <key>CFBundleDisplayName</key>
+    <string>校园网络助手</string>
+    <key>CFBundleExecutable</key>
+    <string>@PROJECT_NAME@</string>
+    <key>CFBundleIconFile</key>
+    <string>CampusNetLogin.icns</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.hz6826.CampusNetLogin</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>CampusNetLogin</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@APP_VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@APP_NUMERIC_VERSION@</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>MIT License · Hz6826 · Qt 采用 LGPLv3，许可证见 Contents/Resources/LICENSES</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>
